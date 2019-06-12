@@ -1,13 +1,27 @@
-﻿# 参考情報
-# https://hinchley.net/articles/creating-a-key-logger-via-a-global-system-hook-using-powershell/
-
+﻿# 
 # 機能
 #   起動後、shift+alt+sキー押下の場合、画面キャプチャーを取得し、指定フォルダに保存
+#   TODO: 指定ファイル名パターンで複数イメージ保存
+#   TODO: イメージ形式変更できるようにする
+#   TODO: ホットキー変更できるようにする
 # 
-$picFolder = "\pic"
-$hotKey = "shift+alt+s" # 「+」は区切り文字として使用
+$picName = "clip.png"
+$picFolder = "C:\Users\linxu\Desktop\project\LearnPowerShell\other\pic"
+
 set-variable -name WH_KEYBOARD_LL -value 13 -option constant
 set-variable -name WM_KEYDOWN -value 0x0100 -option constant
+set-variable -name WM_KEYUP -value 0x0101 -option constant
+set-variable -name WM_SYSKEYDOWN -value 0x0104 -option constant
+set-variable -name WM_SYSKEYUP -value 0x0105 -option constant
+set-variable -name VK_SHIFT -value 0x10 -option constant
+set-variable -name VK_CONTROL -value 0x11 -option constant
+set-variable -name VK_MENU -value 0x12 -option constant
+set-variable -name VK_S -value 0x53 -option constant
+
+Add-Type -AssemblyName System.Runtime.InteropServices
+Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -TypeDefinition "public delegate System.IntPtr HookProc(int nCode, System.IntPtr wParam, System.IntPtr lParam);"
 $source = @"
 [DllImport("user32.dll")]
 public static extern IntPtr SetWindowsHookEx(int idHook, IntPtr lpfn, IntPtr hMod, uint dwThreadId);
@@ -15,143 +29,57 @@ public static extern IntPtr SetWindowsHookEx(int idHook, IntPtr lpfn, IntPtr hMo
 public static extern bool UnhookWindowsHookEx(IntPtr hhk);
 [DllImport("user32.dll")]
 public static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+[DllImport("user32.dll")]
+public static extern short GetKeyState(int nVirtKey);
 [DllImport("kernel32.dll")]
 public static extern IntPtr GetModuleHandle(string lpModuleName);
 "@
-$Win32Api = Add-Type -Name Win32Api -MemberDefinition $source -PassThru
-$Win32Api::GetModuleHandle([System.Diagnostics.Process]::GetCurrentProcess().MainModule.ModuleName)
+$Win32Api = Add-Type -Name "Win32Api" -MemberDefinition $source -PassThru
 
+$moduleHandle = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.BaseAddress
+$hookId = [System.IntPtr]::Zero
 
-#Add-Type -TypeDefinition @"
-#using System;
-#using System.IO;
-#using System.Diagnostics;
-#using System.Runtime.InteropServices;
-#using System.Windows.Forms;
-#
-#namespace KeyLogger {
-#  public static class Program {
-#    private const int WH_KEYBOARD_LL = 13;
-#    private const int WM_KEYDOWN = 0x0100;
-#
-#    private const string logFileName = "log.txt";
-#    private static StreamWriter logFile;
-#
-#    private static HookProc hookProc = HookCallback;
-#    private static IntPtr hookId = IntPtr.Zero;
-#
-#    public static void Main() {
-#      logFile = File.AppendText(logFileName);
-#      logFile.AutoFlush = true;
-#
-#      hookId = SetHook(hookProc);
-#      Application.Run();
-#      UnhookWindowsHookEx(hookId);
-#    }
-#
-#    private static IntPtr SetHook(HookProc hookProc) {
-#      IntPtr moduleHandle = GetModuleHandle(Process.GetCurrentProcess().MainModule.ModuleName);
-#      return SetWindowsHookEx(WH_KEYBOARD_LL, hookProc, moduleHandle, 0);
-#    }
-#
-#    private delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
-#
-#    private static IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam) {
-#      if (nCode >= 0 && wParam == (IntPtr)WM_KEYDOWN) {
-#        int vkCode = Marshal.ReadInt32(lParam);
-#        logFile.WriteLine((Keys)vkCode);
-#      }
-#
-#      return CallNextHookEx(hookId, nCode, wParam, lParam);
-#    }
-#
-#    [DllImport("user32.dll")]
-#    private static extern IntPtr SetWindowsHookEx(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
-#
-#    [DllImport("user32.dll")]
-#    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
-#
-#    [DllImport("user32.dll")]
-#    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
-#
-#    [DllImport("kernel32.dll")]
-#    private static extern IntPtr GetModuleHandle(string lpModuleName);
-#  }
-#}
-#"@ -ReferencedAssemblies System.Windows.Forms
-#
-#[KeyLogger.Program]::Main();
+[HookProc] $hookproc = {
+    param (
+        [int] $nCode,
+        [System.IntPtr] $wParam,
+        [System.IntPtr] $lParam
+    )
+    Write-Host "nCode=$nCode,wParam=$wParam,lParam=$lParam"
+    if (($nCode -ge 0))
+    {
+        if ([System.IntPtr]::Equals($wParam, [System.IntPtr]$WM_KEYDOWN))
+        {
+            $vkCode = [System.Runtime.InteropServices.Marshal]::ReadInt32($lParam);
+            #Write-Host "$vkCode"
+        } elseif ([System.IntPtr]::Equals($wParam, [System.IntPtr]$WM_SYSKEYDOWN)) {
+            $vkCode = [System.Runtime.InteropServices.Marshal]::ReadInt32($lParam);
+            #Write-Host "$vkCode"
+            if(($Win32Api::GetKeyState($VK_SHIFT) -lt 0) -and ($vkCode -eq $VK_S)) {
+                [Windows.Forms.Sendkeys]::SendWait("%{PrtSc}")
+                Start-Sleep -Milliseconds 500
+                $bitmap = [Windows.Forms.Clipboard]::GetImage()
+                $picPath = Join-Path $picFolder $picName
+                #Write-Host "$picPath"
+                $bitmap.Save($picPath,[System.Drawing.Imaging.ImageFormat]::Png)
+            }
+        } else {
+            
+        }
+        
+    }
+    $Win32Api::CallNextHookEx($hookId,$nCode,$wParam,$lParam)
+}
 
-#Add-Type -TypeDefinition @"
-#using System;
-#using System.IO;
-#using System.Diagnostics;
-#using System.Runtime.InteropServices;
-#using System.Windows.Forms;
-#
-#namespace KeyLogger {
-#  public static class Program {
-#    private const int WH_KEYBOARD_LL = 13;
-#    private const int WM_KEYDOWN = 0x0100;
-#
-#    private static HookProc hookProc = HookCallback;
-#    private static IntPtr hookId = IntPtr.Zero;
-#
-#    [StructLayout(LayoutKind.Sequential)]
-#    public class KBDLLHOOKSTRUCT {
-#      public uint vkCode;
-#      public uint scanCode;
-#      public KBDLLHOOKSTRUCTFlags flags;
-#      public uint time;
-#      public UIntPtr dwExtraInfo;
-#    }
-#
-#    [Flags]
-#    public enum KBDLLHOOKSTRUCTFlags : uint {
-#      LLKHF_EXTENDED = 0x01,
-#      LLKHF_INJECTED = 0x10,
-#      LLKHF_ALTDOWN = 0x20,
-#      LLKHF_UP = 0x80,
-#    }
-#
-#    public static void Main() {
-#      hookId = SetHook(hookProc);
-#      Application.Run();
-#      UnhookWindowsHookEx(hookId);
-#    }
-#
-#    private static IntPtr SetHook(HookProc hookProc) {
-#      IntPtr moduleHandle = GetModuleHandle(Process.GetCurrentProcess().MainModule.ModuleName);
-#      return SetWindowsHookEx(WH_KEYBOARD_LL, hookProc, moduleHandle, 0);
-#    }
-#
-#    private delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
-#
-#    private static IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam) {
-#      if (nCode >= 0 && wParam == (IntPtr)WM_KEYDOWN) {
-#
-#        KBDLLHOOKSTRUCT kbd = (KBDLLHOOKSTRUCT) Marshal.PtrToStructure(lParam, typeof(KBDLLHOOKSTRUCT));
-#        Console.WriteLine(kbd.scanCode); // write scan code to console
-#
-#        if (kbd.scanCode == 55) { return (IntPtr)1; }
-#      }
-#
-#      return CallNextHookEx(hookId, nCode, wParam, lParam);
-#    }
-#
-#    [DllImport("user32.dll")]
-#    private static extern IntPtr SetWindowsHookEx(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
-#
-#    [DllImport("user32.dll")]
-#    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
-#
-#    [DllImport("user32.dll")]
-#    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
-#
-#    [DllImport("kernel32.dll")]
-#    private static extern IntPtr GetModuleHandle(string lpModuleName);
-#  }
-#}
-#"@ -ReferencedAssemblies System.Windows.Forms
-#
-#[KeyLogger.Program]::Main();
+$hookprocHandler = [System.Runtime.InteropServices.Marshal]::GetFunctionPointerForDelegate($hookproc)
+$hookId = $Win32Api::SetWindowsHookEx($WH_KEYBOARD_LL,$hookprocHandler,$moduleHandle,0)
+
+# 参考情報
+# https://hinchley.net/articles/creating-a-key-logger-via-a-global-system-hook-using-powershell/
+# https://support.microsoft.com/ja-jp/help/2909958/exceptions-in-windows-powershell-other-dynamic-languages-and-dynamical
+# https://docs.microsoft.com/en-us/windows/desktop/api/libloaderapi/nf-libloaderapi-getmodulehandlea
+# https://docs.microsoft.com/ja-jp/dotnet/api/system.diagnostics.processmodule.baseaddress?view=netframework-4.8#System_Diagnostics_ProcessModule_BaseAddress
+# https://docs.microsoft.com/en-us/windows/desktop/inputdev/virtual-key-codes
+# https://docs.microsoft.com/en-us/windows/desktop/api/winuser/nf-winuser-setwindowshookexa
+# https://docs.microsoft.com/ja-jp/windows/desktop/inputdev/wm-keydown
+# https://stackoverflow.com/questions/54236696/how-to-capture-global-keystrokes-with-powershell
