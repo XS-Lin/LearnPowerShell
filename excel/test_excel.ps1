@@ -22,7 +22,8 @@ else {
     $sheet = $book.Sheets($sheetName)
 }
 # https://docs.microsoft.com/ja-jp/office/vba/api/excel.shapes.addpicture
-$sheet.Shapes.AddPicture($imgPath,$true, $true, 100, 100, -1, -1)
+$sheet.Shapes.AddPicture($imgPath,$true, $true, $sheet.Range("B2:E10").Left, $sheet.Range("B2:E10").Top,  $sheet.Range("B2:E10").Width, $sheet.Range("B2:E15").Height) | Out-Null
+$sheet.Shapes.AddPicture($imgPath,$true, $true, 100, 100, -1, -1) | Out-Null
 $excel.ActiveWorkbook.SaveAS($excelPath)
 $book.Close()
 $excel.Quit()
