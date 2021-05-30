@@ -1,0 +1,10 @@
+{
+  "account":{
+    "id":"",
+    "password":""
+  },
+  "user": [
+    {"login": "","display_name": ""},
+    {"login": "","display_name": ""}
+  ]
+}

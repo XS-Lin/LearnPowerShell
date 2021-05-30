@@ -1,0 +1,25 @@
+{
+    "@type": "MessageCard",
+    "@context": "http://schema.org/extensions",
+    "sections": [
+        {
+            "activityTitle": "**〇〇さん**",
+            "activitySubtitle": "優先度: 高め",
+            "facts": [
+                {
+                    "name": "期日直前",
+                    "value": "[Redmine#123456 XXXの件]()"
+                },
+                {
+                    "name": "期日直前",
+                    "value": "[Redmine#123456 XXXの件]()"
+                },
+                {
+                    "name": "期限切れ",
+                    "value": "[Redmine#123456 XXXの件]()"
+                }
+            ],
+            "markdown": true
+        }
+    ]
+}
